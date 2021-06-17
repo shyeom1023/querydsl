@@ -52,4 +52,5 @@ public class Member {
 		this.team = team;
 		team.getMembers().add(this);
 	}
+	
 }
