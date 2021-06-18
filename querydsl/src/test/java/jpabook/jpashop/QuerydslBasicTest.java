@@ -4,7 +4,6 @@ import static com.querydsl.jpa.JPAExpressions.select;
 import static jpabook.jpashop.entity.QMember.member;
 import static jpabook.jpashop.entity.QTeam.team;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 
@@ -18,16 +17,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.QueryResults;
 import com.querydsl.core.Tuple;
 import com.querydsl.core.types.ExpressionUtils;
 import com.querydsl.core.types.Projections;
+import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.core.types.dsl.CaseBuilder;
 import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.jpa.JPAExpressions;
+import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 
 import jpabook.jpashop.dto.MemberDto;
+import jpabook.jpashop.dto.QMemberDto;
 import jpabook.jpashop.dto.UserDto;
 import jpabook.jpashop.entity.Member;
 import jpabook.jpashop.entity.QMember;
@@ -258,8 +261,10 @@ public class QuerydslBasicTest {
 	@Test
 	void fetchJoinNo() throws Exception {
 
+		System.out.println("==================================start===============================");
 		em.flush();
 		em.clear();
+		System.out.println("==================================start2===============================");
 
 		Member findMember = jpaQueryFactory.select(member).from(member).where(member.username.eq("member1")).fetchOne();
 
@@ -271,14 +276,18 @@ public class QuerydslBasicTest {
 	@Test
 	void fetchJoinUse() throws Exception {
 
+		System.out.println("==================================start===============================");
 		em.flush();
 		em.clear();
-
-		Member findMember = jpaQueryFactory.select(member).from(member).join(member.team, team).fetchJoin()
-				.where(member.username.eq("member1")).fetchOne();
+		System.out.println("==================================start2===============================");
+		Member findMember = jpaQueryFactory
+					.select(member)
+					.from(member)
+					.join(member.team, team).fetchJoin()
+					.where(member.username.eq("member1")).fetchOne();
 
 		boolean loaded = emf.getPersistenceUnitUtil().isLoaded(findMember.getTeam());
-		assertThat(loaded).as("패치 조인 미적용").isTrue();
+		assertThat(loaded).as("패치 조인 적용").isTrue();
 
 	}
 
@@ -511,4 +520,201 @@ public class QuerydslBasicTest {
 			System.out.println("memberDto = "+memberDto);
 		}
 	}	
+	
+	@Test
+	void findUSERDtoByConstructor() {
+		
+		List<UserDto> result = jpaQueryFactory
+			.select(Projections.constructor(UserDto.class, //getter setter 상관없이 값이 수정됨
+						member.username,
+						member.age
+					))
+			.from(member)
+			.fetch();
+		
+		for(UserDto memberDto : result) {
+			System.out.println("memberDto = "+memberDto);
+		}
+	}
+	
+	
+	@Test
+	void findDtoByQueryProjection() {
+		List<MemberDto> result = jpaQueryFactory
+			.select(new QMemberDto(member.username, member.age))
+			.from(member)
+			.fetch();
+		
+		for(MemberDto memberDto : result) {
+			System.out.println("MemberDto = "+ memberDto);
+		}
+	}
+	
+	@Test
+	void dynamicQuery_BooleanBuilder() {
+		String usernameParam = "member1";
+		Integer ageParma = null;
+		
+		List<Member> result = searchMember1(usernameParam,ageParma);
+		assertThat(result.size()).isEqualTo(1);
+	}
+	
+	private List<Member> searchMember1(String usernameCond, Integer ageCond){
+		
+		BooleanBuilder builder = new BooleanBuilder();
+		if(usernameCond != null) {
+			builder.and(member.username.eq(usernameCond));
+		}
+		
+		if(ageCond != null) {
+			builder.and(member.age.eq(ageCond));
+		}
+		
+		
+		return jpaQueryFactory
+				.select(member)
+				.from(member)
+				.where(builder)
+				.fetch();
+		
+	}
+	
+	@Test
+	void dynamicQuery_WhereParam() {
+		String usernameParam = "member1";
+		Integer ageParma = 10;
+		
+		List<Member> result = searchMember2(usernameParam,ageParma);
+		assertThat(result.size()).isEqualTo(1);
+	}
+	
+	private List<Member> searchMember2(String usernameCond, Integer ageCond){
+		
+		return jpaQueryFactory
+					.select(member)
+					.from(member)
+//					.where(usernameEq(usernameCond), ageEq(ageCond))
+					.where(allEq(usernameCond, ageCond))
+					.fetch();
+		
+	}	
+
+	private BooleanExpression usernameEq(String usernameCond) {
+		return usernameCond == null ? null : member.username.eq(usernameCond);		
+	}
+	
+	private BooleanExpression ageEq(Integer ageCond) {
+		return ageCond == null ? null : member.age.eq(ageCond);
+	}
+	
+	private BooleanExpression  allEq(String usernameCond, Integer ageCond) {
+			
+		return usernameEq(usernameCond).and(ageEq(ageCond));
+	}
+	
+	@Test
+	void bulkUpdate() {	//영속성 컨텍스트에는 값이 변하지 않고 db에만 값이 변함
+		
+		//member1 = 10 -> DB member1
+		//member2 = 20 -> DB member2
+		//member3 = 30 -> DB member3
+		//member4 = 40 -> DB member4
+		
+		long count = jpaQueryFactory
+			.update(member)
+			.set(member.username, "비회원")
+			.where(member.age.lt(28))
+			.execute();
+		
+		em.flush();
+		em.clear();
+		
+		//member1 = 10 -> DB 비회원
+		//member2 = 20 -> DB 비회원
+		//member3 = 30 -> DB member3
+		//member4 = 40 -> DB member4
+		
+		List<Member> result = jpaQueryFactory
+				.select(member)
+				.from(member)
+				.fetch();
+		
+		for(Member mem : result) {
+			System.out.println("mem = " + mem);
+		}
+	}
+	
+	@Test
+	void bulkAdd() {
+		long count = jpaQueryFactory
+				.update(member)
+				.set(member.age, member.age.add(1)) //multiply(2) 곱하기 빼기는 add에 -1하면 됨
+				.execute();
+		
+		em.flush();
+		em.clear();
+		
+		List<Member> result = jpaQueryFactory
+				.select(member)
+				.from(member)
+				.fetch();
+		
+		for(Member mem : result) {
+			System.out.println("mem = " + mem);
+		}
+	}
+	
+	@Test
+	void bulkDelete() {
+		long count = jpaQueryFactory
+				.delete(member)
+				.where(member.age.gt(18))
+				.execute();
+		
+		em.flush();
+		em.clear();
+		
+		List<Member> result = jpaQueryFactory
+				.select(member)
+				.from(member)
+				.fetch();
+		
+		for(Member mem : result) {
+			System.out.println("mem = " + mem);
+		}
+	}
+	
+	@Test
+	void sqlFunction() {
+		List<String> result = jpaQueryFactory
+				.select(
+						Expressions.stringTemplate(
+								"function('replace', {0}, {1}, {2})",
+								member.username, "member", "M")
+						)
+				.from(member)
+				.fetch();
+		
+		for(String s : result) {
+			System.out.println("s = "+s);
+		}
+	}
+	
+	@Test
+	void sqlFuncion2() {
+
+		List<String> result = jpaQueryFactory
+				.select(member.username)
+				.from(member)
+//				.where(member.username.eq(Expressions.stringTemplate("function('lower',{0})", member.username)))
+				.where(member.username.eq(member.username.lower()))
+				.fetch();
+		
+		for(String s : result) {
+			System.out.println("s = "+s);
+		}
+		
+	}
+	
+	
 }

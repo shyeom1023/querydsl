@@ -17,7 +17,6 @@ import jpabook.jpashop.entity.QHello;
 
 @SpringBootTest
 @Transactional
-@Commit
 class QuerydslApplicationTests {
 
 	@Autowired
